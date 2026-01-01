@@ -66,7 +66,6 @@ class Car:
         # --- CHECK 1: Traffic Light ---
         if traffic_light.state == "RED":
             if self.lane_direction == 'vertical':
-                # Stop if approaching line AND haven't passed it
                 if self.y < self.stop_line and self.y > (self.stop_line - 50):
                     should_stop = True
             elif self.lane_direction == 'horizontal':
@@ -76,9 +75,7 @@ class Car:
         # --- CHECK 2: Car Ahead (Collision Avoidance) ---
         if car_ahead:
             if self.lane_direction == 'vertical':
-                # Calculate distance to the car in front
                 distance = car_ahead.y - self.y
-                # If car is ahead (positive distance) AND too close -> STOP
                 if 0 < distance < self.safe_distance:
                     should_stop = True
             elif self.lane_direction == 'horizontal':
@@ -94,27 +91,49 @@ class Car:
                 self.x += self.speed
             
     def draw(self, screen):
-        # Determine color (Visual debug: Red if stopped, Blue if moving)
-        # For now, let's keep it blue
-        pygame.draw.rect(screen, BLUE_CAR, (self.x, self.y, 20, 40))
+        # --- FIX: Determine dimensions based on direction ---
+        if self.lane_direction == 'vertical':
+            width = 20
+            height = 40
+        else: # horizontal
+            width = 40
+            height = 20
+            
+        pygame.draw.rect(screen, BLUE_CAR, (self.x, self.y, width, height))
 
-
+        
 
 class TrafficSimulation:
     def __init__(self):
         pygame.init()
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
-        pygame.display.set_caption("UoM Smart Traffic Project - Sprint 4")
+        pygame.display.set_caption("UoM Smart Traffic Project - Sprint 5")
         self.clock = pygame.time.Clock()
         self.running = True
         
-        # Components
-        self.traffic_light = TrafficLight(320, 320, 'vertical') 
+        # --- TRAFFIC LIGHTS ---
+        # Create two lights. 
+        # Light 1 (Vertical) starts RED.
+        # Light 2 (Horizontal) starts GREEN.
+        self.light_vertical = TrafficLight(320, 320, 'vertical')
+        self.light_vertical.state = "RED"
         
-        # CHANGED: Use a list for cars
-        self.cars = [] 
-        self.spawn_timer = 0 # Timer to control how often cars appear
+        self.light_horizontal = TrafficLight(450, 450, 'horizontal') 
+        self.light_horizontal.state = "GREEN" # Opposite of vertical
         
+        # --- CAR LISTS ---
+        # Separate lists for collision logic
+        self.vertical_cars = [] 
+        self.horizontal_cars = []
+
+        self.last_switch_time = 0
+        self.min_switch_time = 200 # Frames (approx 3-4 seconds)
+        
+        # REMOVE self.spawn_timer if you want, or keep it for spawning
+        self.spawn_timer = 0
+        
+       
+
 
     def draw_road(self):
         """Draws the background grass and the black roads."""
@@ -130,39 +149,99 @@ class TrafficSimulation:
         pygame.draw.line(self.screen, WHITE_MARKING, (400, 0), (400, HEIGHT), 2)
         pygame.draw.line(self.screen, WHITE_MARKING, (0, 400), (WIDTH, 400), 2)
 
+
+    def get_queue_length(self, cars, lane_type):
+        """Counts how many cars are waiting near the intersection."""
+        count = 0
+        for car in cars:
+            # Check if car is stopped or moving very slowly
+            # AND is close to the intersection (Stop Zone)
+            
+            is_stopped = car.speed == 0 or (hasattr(car, 'waiting') and car.waiting) 
+            # Note: In our current simple physics, cars just stop moving. 
+            # Let's check if they are near the stop line.
+            
+            if lane_type == 'vertical':
+                if 250 < car.y < 340: # Between 250px and stop line
+                    count += 1
+            elif lane_type == 'horizontal':
+                if 250 < car.x < 340:
+                    count += 1
+        return count
+    
+
+
     def run(self):
         while self.running:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self.running = False
             
-            # --- UPDATE LOGIC ---
-            self.traffic_light.update()
+            # --- 1. SMART TRAFFIC LOGIC ---
+            # Increase the timer since last switch
+            self.last_switch_time += 1
+            
+            # Count the queues
+            v_count = self.get_queue_length(self.vertical_cars, 'vertical')
+            h_count = self.get_queue_length(self.horizontal_cars, 'horizontal')
+            
+            # DEBUG: Print counts to console to see if it works
+            # print(f"Vertical: {v_count} | Horizontal: {h_count}")
 
-            # 1. Spawner: Add a new car every 100 frames (approx 1.5 seconds)
+            # DECISION ALGORITHM:
+            # Only switch if:
+            # 1. We have waited long enough (Cool-down)
+            # 2. The RED lane has significantly more cars than the GREEN lane
+            
+            if self.last_switch_time > self.min_switch_time:
+                
+                if self.light_vertical.state == "GREEN":
+                    # If vertical is green but horizontal has a queue -> Switch
+                    if h_count > v_count:
+                        self.light_vertical.state = "RED"
+                        self.light_horizontal.state = "GREEN"
+                        self.last_switch_time = 0
+                        
+                elif self.light_vertical.state == "RED":
+                    # If vertical is red but has a huge queue -> Switch
+                    if v_count > h_count:
+                        self.light_vertical.state = "GREEN"
+                        self.light_horizontal.state = "RED"
+                        self.last_switch_time = 0
+                        
+
+            # --- 2. SPAWNER (Randomly spawn in both lanes) ---
             self.spawn_timer += 1
-            if self.spawn_timer > 100:
-                self.cars.append(Car('vertical'))
+            if self.spawn_timer > 60: # Spawn faster (every 1 second)
+                import random
+                if random.choice([True, False]):
+                    self.vertical_cars.append(Car('vertical'))
+                else:
+                    self.horizontal_cars.append(Car('horizontal'))
                 self.spawn_timer = 0
 
-            # 2. Move Cars
-            for i, car in enumerate(self.cars):
-                # Find the car ahead
-                car_ahead = None
-                if i > 0: # If not the first car, the one ahead is at index i-1
-                    car_ahead = self.cars[i-1]
-                
-                car.move(self.traffic_light, car_ahead)
+            # --- 3. MOVE VERTICAL CARS ---
+            for i, car in enumerate(self.vertical_cars):
+                car_ahead = self.vertical_cars[i-1] if i > 0 else None
+                car.move(self.light_vertical, car_ahead)
 
-            # 3. Cleanup: Remove cars that have gone off screen (Memory Management)
-            # (Simple check: if y > HEIGHT, remove it)
-            self.cars = [car for car in self.cars if car.y < HEIGHT and car.x < WIDTH]
+            # --- 4. MOVE HORIZONTAL CARS ---
+            for i, car in enumerate(self.horizontal_cars):
+                car_ahead = self.horizontal_cars[i-1] if i > 0 else None
+                car.move(self.light_horizontal, car_ahead)
+
+            # --- 5. CLEANUP ---
+            self.vertical_cars = [c for c in self.vertical_cars if c.y < HEIGHT]
+            self.horizontal_cars = [c for c in self.horizontal_cars if c.x < WIDTH]
             
-            # --- DRAWING ---
+            # --- 6. DRAWING ---
             self.draw_road()
-            self.traffic_light.draw(self.screen)
-            for car in self.cars:
-                car.draw(self.screen)
+            
+            self.light_vertical.draw(self.screen)
+            self.light_horizontal.draw(self.screen)
+            
+            for car in self.vertical_cars: car.draw(self.screen)
+            for car in self.horizontal_cars: car.draw(self.screen)
             
             pygame.display.flip()
             self.clock.tick(FPS)
@@ -174,6 +253,5 @@ class TrafficSimulation:
 if __name__ == "__main__":
     sim = TrafficSimulation()
     sim.run()
-
 
 
