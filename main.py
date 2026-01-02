@@ -49,6 +49,7 @@ class Car:
         self.speed = 3
         self.length = 40  # Length of the car
         self.safe_distance = 60 # Minimum gap to keep
+        self.wait_time = 0
         
         # STOPPING DISTANCE VARIABLES
         if self.lane_direction == 'vertical':
@@ -84,7 +85,9 @@ class Car:
                     should_stop = True
 
         # --- MOVE ---
-        if not should_stop:
+        if should_stop:
+            self.wait_time += 1  # Increment wait time if stopped
+        else:
             if self.lane_direction == 'vertical':
                 self.y += self.speed
             elif self.lane_direction == 'horizontal':
@@ -128,6 +131,8 @@ class TrafficSimulation:
 
         self.last_switch_time = 0
         self.min_switch_time = 200 # Frames (approx 3-4 seconds)
+        pygame.font.init()
+        self.font = pygame.font.SysFont('Arial', 24)
         
         # REMOVE self.spawn_timer if you want, or keep it for spawning
         self.spawn_timer = 0
@@ -208,7 +213,7 @@ class TrafficSimulation:
                         self.light_vertical.state = "GREEN"
                         self.light_horizontal.state = "RED"
                         self.last_switch_time = 0
-                        
+
 
             # --- 2. SPAWNER (Randomly spawn in both lanes) ---
             self.spawn_timer += 1
